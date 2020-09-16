@@ -3,18 +3,20 @@ from __future__ import print_function
 
 # This is really Pillow... This does not go as good of a job as exiftool.
 from PIL import Image, ExifTags
-
-import os
 import sys
+import os
 import warnings
 import datetime
-import time
 import hashlib
 import pickle
 import subprocess
 import json
 from os import path, stat
+import re
+sys.path.insert(0, "/home/schwager/Projects/Pixalamode/debug_print")
 
+# Found via Settings -> Project Interpreter -> Show All -> Show paths button
+# (otherwise it's flagged as an error)
 from debug_print import Debug
 debug = Debug(True)
 
@@ -69,6 +71,19 @@ class Rummage:
     """
     Class that represents a rummage through the local filesystem, populating a
     pickle file and keeping a dictionary for you to reference.
+
+    Results are stored in dictionaries. The top level dictionary is
+    exif_dates_dict[]      it contains:
+        "exif_unrecognized"
+        "exif_no_dates"
+        "exif_ignore_based_on_name"
+        "exif_no_attributes"
+        "exif_unrecognized_entry"
+        "exif_big_diff_orig_digitized"
+        "exif_date"
+    These are the entries inside the dictionary. They are themselves dictionaries.
+
+    Good results are stored in exif_dates_dict[exif_date[]]
     """
     def __init__(self, directory):
         if not os.path.exists(directory):
@@ -84,7 +99,7 @@ class Rummage:
 
         self.pickle_dump = dir_hash + ".pickle"
 
-        self.exif_dates_dict = None
+        self._exif_dates_dict = {}
 
         for dirname, subdir_list, file_list in os.walk(directory):
             # print (">>> =========", dirname, "=========================")
@@ -94,14 +109,14 @@ class Rummage:
                 # TODO: Add an option to include links. This means that we ignore all symbolic links.
                 if not os.path.islink(filename):
                     if os.path.isfile(filename):
-                        return_code = self.do_exif(filename, self.exif_dates_dict)
+                        return_code = self.do_exif(filename, self._exif_dates_dict)
                         if return_code == RETURN_CODE_MISSING:
                             raise RuntimeError("This should not happen: no return code from do_exif")
 
         if self.opened_pickle:
             to_delete = []
-            for output_name in self.exif_dates_dict:
-                file_dict = self.exif_dates_dict[output_name]
+            for output_name in self._exif_dates_dict:
+                file_dict = self._exif_dates_dict[output_name]
                 for file_entry in file_dict:
                     file_entry_stat = file_dict[file_entry][0]
                     try:
@@ -113,7 +128,7 @@ class Rummage:
                     print("Deleted Entry:", file_entry)
 
         with open(self.pickle_dump, "wb") as f:
-            pickle.dump(self.exif_dates_dict, f)
+            pickle.dump(self._exif_dates_dict, f)
 
         manifest = None
         if os.path.exists(MANIFEST):
@@ -144,11 +159,6 @@ class Rummage:
             self.opened_pickle = True
         else:
             self._exif_dates_dict = {}
-
-    def get_field(self, exif, field):
-        for (k, v) in exif.iteritems():
-            if TAGS.get(k) == field:
-                return v
 
 
     def get_hash(self, a_filename):
@@ -187,10 +197,10 @@ class Rummage:
         # According to the docs (python3.4):
         # "The compiled versions of the most recent patterns passed to re.compile() and
         # the module-level matching functions are cached, so programs that use only a few regular
-        # expressions at a time needn’t worry about compiling regular expressions."
+        # expressions at a time needn't worry about compiling regular expressions."
         regexp_to_check = [r'((19)|(20)|(21))[0-9][0-9][0-1][0-9][0-3][0-9]',
                            r'((19)|(20)|(21))[0-9][0-9]\W[0-1][0-9]\W[0-3][0-9]']
-        basename = path.basename(pathname)
+        basename = path.basename(filename)
         for regexp in regexp_to_check:
             pattern = re.compile(regexp)
             match = pattern.search(basename)
@@ -565,7 +575,7 @@ class Rummage:
         return return_code
 
 
-            # TODO!!!!
+        # TODO!!!!
 
         # print (compare_dates(exif, 'DateTime', 'DateTimeDigitized') + " " + filename)
         # print (compare_dates(exif, 'DateTime', 'DateTimeOriginal') + " " + filename)
